@@ -1,0 +1,1 @@
+worker: python Money_bott.py

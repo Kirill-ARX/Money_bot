@@ -1,0 +1,4 @@
+aiogram==3.14.0
+pandas
+openpyxl
+requests
