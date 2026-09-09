@@ -58,16 +58,16 @@ db.commit()
 
 
 # =====================================================================
-# КЛАВИАТУРЫ (КНОПКИ)
+# КЛАВИАТУРЫ (КНОПКИ — ТЕПЕРЬ СТРОГО КАК НА СКРИНШОТЕ)
 # =====================================================================
 def get_main_keyboard(user_id):
     buttons = [
         [KeyboardButton(text="💰 Мой баланс"), KeyboardButton(text="📊 Общая статистика")],
-        [KeyboardButton(text="🧮 Калькулятор процентов")]
+        [KeyboardButton(text="🧮 Калькулятор Ozon")]
     ]
-    # Если кнопку нажимает админ (Кирилл) — добавляем кнопку админки
+    # Если кнопку нажимает админ (Кирилл) — добавляем кнопку админки на русском
     if user_id == ADMIN_ID:
-        buttons.append([KeyboardButton(text="⚙️ Admin-Панель")])
+        buttons.append([KeyboardButton(text="⚙️ Админ-Панель")])
 
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
@@ -129,8 +129,8 @@ async def global_status(message: Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-# Кнопка и команда: Калькулятор процентов
-@dp.message(F.text == "🧮 Калькулятор процентов")
+# Кнопка и команда: Калькулятор Ozon (ФИКС: ТЕПЕРЬ СЛУШАЕТ НАЗВАНИЕ КНОПКИ)
+@dp.message(F.text == "🧮 Калькулятор Ozon")
 @dp.message(Command("calculator"))
 async def ozon_calc(message: Message):
     if message.from_user.id not in ALLOWED_USERS: return
@@ -166,12 +166,12 @@ async def get_chat_and_user_id(message: Message):
 
 
 # =====================================================================
-# АДМИНКА
+# АДМИНКА (ФИКС: ТЕПЕРЬ СЛУШАЕТ НАЗВАНИЕ НА РУССКОМ "⚙️ Админ-Панель")
 # =====================================================================
-@dp.message(F.text == "⚙️ Admin-Панель")
+@dp.message(F.text == "⚙️ Админ-Панель")
 async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer("Добро пожаловать в panel управления, Мяу!", reply_markup=admin_kb)
+    await message.answer("Добро пожаловать в панель управления, Мяу!", reply_markup=admin_kb)
 
 
 @dp.message(F.text.startswith("➕ Изменить"))
@@ -242,7 +242,6 @@ async def start_web_server():
     port = int(os.environ.get("PORT", 8080))
     site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print(f"Фоновый веб-сервер успешно запущен на порту {port}!")
 
 
 # =====================================================================
