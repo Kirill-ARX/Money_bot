@@ -1,6 +1,7 @@
 import asyncio
 import sqlite3
 import os
+import gspread
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command
@@ -9,248 +10,233 @@ from aiohttp import web
 # =====================================================================
 # НАСТРОЙКИ: Данные
 # =====================================================================
-TOKEN = "8628691428:AAEZ6Ec44uHwm5ey5xsIS6Ilj-9dNuDYOas"  # Токен бота
+TOKEN = "8628691428:AAEZ6Ec44uHwm5ey5xsIS6Ilj-9dNuDYOas"
+SPREADSHEET_URL = "https://google.com"
 
-ADMIN_ID = 5551943786  # Telegram ID админа и пользователя (Кирилл)
-USER2_ID = 5178460435  # Telegram ID второго партнера (Максим)
-USER3_ID = 5959142753  # Telegram ID третьего партнера (Лёня)
+ADMIN_ID = 5551943786  # Кирилл (Админ)
+USER2_ID = 5178460435  # Максим
+USER3_ID = 5959142753  # Лёня
 
-# Список разрешенных пользователей (белый список на 3 человек)
 ALLOWED_USERS = [ADMIN_ID, USER2_ID, USER3_ID]
 
-# Словарь для красивого отображения имен в отчетах
 USER_NAMES = {
     ADMIN_ID: "Кирилл",
     USER2_ID: "Максим",
     USER3_ID: "Лёня"
 }
 
-# =====================================================================
-# ИНИЦИАЛИЗАЦИЯ И БАЗА ДАННЫХ
-# =====================================================================
+# Подключение к Google Таблице
+try:
+    gc = gspread.service_account(filename='creds.json')
+    sh = gc.open_by_url(SPREADSHEET_URL)
+    worksheet = sh.get_worksheet(0)
+    print("Успешное подключение к Google Таблице!")
+except Exception as e:
+    print(f"Ошибка таблицы: {e}")
+    worksheet = None
+
 bot = Bot(token=TOKEN)
 dp = Dispatcher()
 
+# База данных для учета ручных расходов/вычетов
 db = sqlite3.connect("wallet.db")
 cursor = db.cursor()
-
-# Создаем таблицы, если их еще нет
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS users (
-    user_id INTEGER PRIMARY KEY,
-    balance REAL DEFAULT 0.0
-)
-""")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS global_stats (
-    id INTEGER PRIMARY KEY,
-    profit REAL DEFAULT 0.0,
-    bank_percent REAL DEFAULT 10.0
-)
-""")
-db.commit()
-
-# Заполняем базу начальными данными
-for uid in ALLOWED_USERS:
-    cursor.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (uid,))
-cursor.execute("INSERT OR IGNORE INTO global_stats (id) VALUES (1)")
+cursor.execute("CREATE TABLE IF NOT EXISTS expenses (id INTEGER PRIMARY KEY AUTOINCREMENT, amount REAL, comment TEXT)")
 db.commit()
 
 # =====================================================================
-# КЛАВИАТУРЫ (КНОПКИ В ЧАТЕ С БОТОМ)
+# КЛАВИАТУРЫ
 # =====================================================================
 def get_main_keyboard(user_id):
     buttons = [
-        [KeyboardButton(text="💰 Мой баланс"), KeyboardButton(text="📊 Общая статистика")],
-        [KeyboardButton(text="🧮 Калькулятор %")]  # Кнопка называется так
+        [KeyboardButton(text="💰 Мой баланс"), KeyboardButton(text="📦 Что в работе")],
+        [KeyboardButton(text="📊 Общая статистика"), KeyboardButton(text="🧮 Калькулятор %")]
     ]
-    # Если кнопку нажимает админ (Кирилл)
     if user_id == ADMIN_ID:
         buttons.append([KeyboardButton(text="⚙️ Админ-Панель")])
-
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
-
 admin_kb = ReplyKeyboardMarkup(keyboard=[
-    [KeyboardButton(text="➕ Изменить баланс Максим"), KeyboardButton(text="➕ Изменить баланс Лёня")],
-    [KeyboardButton(text="➕ Изменить мой баланс"), KeyboardButton(text="📈 Поменять % вклада")],
     [KeyboardButton(text="🔙 Главное меню")]
 ], resize_keyboard=True)
 
 # =====================================================================
-# ЛОГИКА БОТА (ХЕНДЛЕРЫ)
+# ЛОГИКА АВТО-ПОДГРУЗКИ И ПАРСИНГА ТАБЛИЦЫ
+# =====================================================================
+def parse_table_data():
+    if not worksheet:
+        return 0.0, "⚠️ Таблица недоступна"
+    
+    records = worksheet.get_all_values()
+    total_profit = 0.0
+    report_text = "📱 *ТОВАР В РАБОТЕ:*\n\n"
+    
+    # Пропускаем шапку таблицы (первую строку)
+    for row in records[1:]:
+        if len(row) < 9 or not row[1]:  # Если строка пустая
+            continue
+            
+        model = row[1]       # Столбец B: Модель
+        price = row[2]       # Столбец C: Цена
+        status = row[4]      # Столбец E: Состояние/Статус (выкуплен/продан)
+        expected_p = row[7]  # Столбец H: Ожидаемая прибыль
+        
+        # Красиво форматируем вывод статуса
+        emoji = "🟢" if "прода" in status.lower() or "выкуп" in status.lower() else "🟡"
+        report_text += f"{emoji} *{model}* ({price} руб.) — _{status}_\n"
+        
+        # Плюсуем прибыль, если позиция успешна
+        if "прода" in status.lower() or "выкуп" in status.lower():
+            try:
+                # Очищаем строку от лишних знаков и переводим в число
+                clean_p = expected_p.replace("k", "000").replace("к", "000").replace(" ", "")
+                total_profit += float(clean_p)
+            except ValueError:
+                pass
+                
+    return total_profit, report_text
+
+# =====================================================================
+# ХЕНДЛЕРЫ
 # =====================================================================
 
-# Команда /start и кнопка Назад
 @dp.message(Command("start"))
 @dp.message(F.text == "🔙 Главное меню")
 async def start_cmd(message: Message):
-    if message.from_user.id not in ALLOWED_USERS:
-        return await message.answer("❌ Доступ закрыт. Вы не входите в список участников.")
+    if message.from_user.id not in ALLOWED_USERS: return
+    await message.answer("Система активна. Данные синхронизированы с Google.", reply_markup=get_main_keyboard(message.from_user.id))
 
-    await message.answer(
-        f"Привет, {message.from_user.first_name}! Что хочешь посмотреть?",
-        reply_markup=get_main_keyboard(message.from_user.id)
-    )
+# Кнопка: Что в работе (выводит список девайсов)
+@dp.message(F.text == "📦 Что в работе")
+async def what_is_working(message: Message):
+    if message.from_user.id not in ALLOWED_USERS: return
+    _, report = parse_table_data()
+    await message.answer(report, parse_mode="Markdown")
 
-# Кнопка: Личный баланс
+# Кнопка: Личный баланс (с учетом авто-прибыли и вычетов)
 @dp.message(F.text == "💰 Мой баланс")
 async def my_balance(message: Message):
     if message.from_user.id not in ALLOWED_USERS: return
-    uid = message.from_user.id
-    res = cursor.execute("SELECT balance FROM users WHERE user_id = ?", (uid,)).fetchone()
-    balance = res[0] if res else 0.0
-    await message.answer(f"👤 Твой личный баланс: *{balance:,} руб.*", parse_mode="Markdown")
+    
+    table_profit, _ = parse_table_data()
+    # Считаем сумму всех ручных вычетов/расходов из базы
+    total_expenses = cursor.execute("SELECT SUM(amount) FROM expenses").fetchone()[0] or 0.0
+    
+    # Чистый пул = прибыль из таблицы минус общие расходы
+    net_pool = table_profit - total_expenses
+    share = round(net_pool / 3, 2)  # Доля каждого участника
+    
+    await message.answer(f"👤 Твой личный баланс (1/3 доля пула): *{share:,} руб.*", parse_mode="Markdown")
 
-
-# Кнопка и команда: Общая статистика
+# Кнопка: Общая статистика
 @dp.message(F.text == "📊 Общая статистика")
 @dp.message(Command("stat"))
 async def global_status(message: Message):
     if message.from_user.id not in ALLOWED_USERS: return
-
-    total_balances = cursor.execute("SELECT SUM(balance) FROM users").fetchone()[0] or 0.0
-    profit, bank_pct = cursor.execute("SELECT profit, bank_percent FROM global_stats WHERE id = 1").fetchone()
-
-    users_info = ""
-    all_users = cursor.execute("SELECT user_id, balance FROM users").fetchall()
-    for row in all_users:
-        users_info += f"• {USER_NAMES.get(row[0], 'Unknown')}: {row[1]:,} руб.\n"
+    
+    table_profit, _ = parse_table_data()
+    total_expenses = cursor.execute("SELECT SUM(amount) FROM expenses").fetchone()[0] or 0.0
+    net_pool = table_profit - total_expenses
+    share = round(net_pool / 3, 2)
+    
+    # Берем процент из глобальной локальной настройки (по умолчанию 16%)
+    bank_pct = 16.0 
 
     text = (
-        f"🌍 *ОБЩАЯ СТАТИСТИКА* 🌍\n\n"
-        f"💰 *Всего денег в обороте:* {total_balances:,} руб.\n"
-        f"📈 *Чистая прибыль:* {profit:,} руб.\n"
-        f"🏦 *Процент вклада в банке:* {bank_pct}%\n\n"
-        f"👥 *Разбивка по участникам:*\n{users_info}"
+        f"🌍 *ОБЩАЯ СТАТИСТИКА ТЕМКЕ* 🌍\n\n"
+        f"📈 *Вся прибыль из таблицы:* {table_profit:,} руб.\n"
+        f"📉 *Общие расходы/вычеты:* {total_expenses:,} руб.\n"
+        f"💰 *Чистый пул в обороте:* *{net_pool:,} руб.*\n\n"
+        f"👥 *Разбивка долей (на 3 человек):*\n"
+        f"• Кирилл: {share:,} руб.\n"
+        f"• Максим: {share:,} руб.\n"
+        f"• Лёня: {share:,} руб."
     )
     await message.answer(text, parse_mode="Markdown")
 
-
-# Кнопка и команда: Калькулятор % (ФИКС: ХЕНДЛЕР ТЕПЕРЬ СТРОГО СЛУШАЕТ НАЗВАНИЕ КНОПКИ)
+# Кнопка: Калькулятор процентов
 @dp.message(F.text == "🧮 Калькулятор %")
 @dp.message(Command("calculator"))
 async def bank_calc(message: Message):
     if message.from_user.id not in ALLOWED_USERS: return
-
-    total_balances = cursor.execute("SELECT SUM(balance) FROM users").fetchone()[0] or 0.0
-    _, bank_pct = cursor.execute("SELECT profit, bank_percent FROM global_stats WHERE id = 1").fetchone()
-
-    year_income = total_balances * (bank_pct / 100)
+    
+    table_profit, _ = parse_table_data()
+    total_expenses = cursor.execute("SELECT SUM(amount) FROM expenses").fetchone()[0] or 0.0
+    net_pool = table_profit - total_expenses
+    
+    bank_pct = 16.0  # Примерная ставка банка
+    year_income = net_pool * (bank_pct / 100)
     month_income = year_income / 12
     day_income = year_income / 365
 
     text = (
         f"🧮 *Прогноз доходности вклада*\n"
-        f"Расчет от общей суммы: *{total_balances:,} руб.* под *{bank_pct}%*\n\n"
+        f"Расчет от чистого пула: *{net_pool:,} руб.* под *{bank_pct}%*\n\n"
         f"💰 В день: `+{round(day_income, 2):,} руб.`\n"
         f"📅 В месяц: `+{round(month_income, 2):,} руб.`\n"
         f"🗓 В год: `+{round(year_income, 2):,} руб.`"
     )
     await message.answer(text, parse_mode="Markdown")
 
-
-# Команда: /id
 @dp.message(Command("id"))
 async def get_chat_and_user_id(message: Message):
     if message.from_user.id not in ALLOWED_USERS: return
-    thread_id = message.message_thread_id
-    text = (
-        f"🆔 *Твой личный Telegram ID:* `{message.from_user.id}`\n"
-        f"💬 *ID этой группы:* `{message.chat.id}`\n"
-        f"📌 *ID текущей темы (топика):* `{thread_id if thread_id else 'Основной чат'}`"
-    )
-    await message.answer(text, parse_mode="Markdown")
-
+    await message.answer(f"💬 ID чата: `{message.chat.id}`\n📌 ID топика: `{message.message_thread_id}`", parse_mode="Markdown")
 
 # =====================================================================
-# АДМИНКА
+# АДМИНКА И ФУНКЦИЯ ВЫЧЕТА (ДОЛЕВОЙ МИНУС)
 # =====================================================================
 @dp.message(F.text == "⚙️ Админ-Панель")
 async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer("Добро пожаловать в панель управления, Мяу!", reply_markup=admin_kb)
-
-
-@dp.message(F.text.startswith("➕ Изменить"))
-async def info_how_to_change(message: Message):
-    if message.from_user.id != ADMIN_ID: return
     await message.answer(
-        "ℹ️ Чтобы изменить баланс или прибыль, отправь боту сообщение в формате:\n\n"
-        "`сет баланс 2 50000` (установит баланс Максиму равным 50к)\n"
-        "`сет баланс 3 0` (жестко сбросит баланс Лёне в 0)\n"
-        "`сет админ 10000` (установит тебе баланс 10к)\n"
-        "`сет прибыль 15000` (установит общую чистую прибыль)\n",
-        parse_mode="Markdown"
+        "⚙️ *Панель управления вычетами*\n\n"
+        "Прибыль бот считает сам на основе таблицы.\n"
+        "Если нужно записать общий расход или вычесть деньги, напиши в чат:\n"
+        "`минус сумма коммент` (Пример: `минус 1500 проезд ремонт`)\n\n"
+        "Чтобы сбросить все вычеты в ноль, напиши:\n"
+        "`сброс вычетов`", 
+        reply_markup=admin_kb, parse_mode="Markdown"
     )
 
-
-@dp.message(F.text == "📈 Поменять % вклада")
-async def info_how_to_pct(message: Message):
+# Обработчик команды вычета расходов "минус 1500 ремонт"
+@dp.message(F.text.lower().startswith("минус "))
+async def admin_minus_command(message: Message):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer("ℹ️ Чтобы поменять % ставку банка, напиши:\n`сет процент 16.5`", parse_mode="Markdown")
-
-
-# Обработчик текстовых команд управления "сет ..."
-@dp.message(F.text.lower().startswith("сет "))
-async def admin_commands(message: Message):
-    if message.from_user.id != ADMIN_ID: return
-
     parts = message.text.split()
     try:
-        cmd_type = parts[1].lower()
-
-        if cmd_type == "баланс":
-            target_user = USER2_ID if parts[2] == "2" else USER3_ID
-            amount = float(parts[3])
-            cursor.execute("UPDATE users SET balance = ? WHERE user_id = ?", (amount, target_user))
-            await message.answer(f"✅ Баланс участника {USER_NAMES.get(target_user)} изменен на {amount} руб.")
-
-        elif cmd_type == "админ":
-            amount = float(parts[2])
-            cursor.execute("UPDATE users SET balance = ? WHERE user_id = ?", (amount, ADMIN_ID))
-            await message.answer(f"✅ Твой баланс изменен на {amount} руб.")
-
-        elif cmd_type == "прибыль":
-            amount = float(parts[2])
-            cursor.execute("UPDATE global_stats SET profit = ? WHERE id = 1", (amount,))
-            await message.answer(f"✅ Чистая прибыль установлена: {amount} руб.")
-
-        elif cmd_type == "процент":
-            pct = float(parts[2])
-            cursor.execute("UPDATE global_stats SET bank_percent = ? WHERE id = 1", (pct,))
-            await message.answer(f"✅ Процентная ставка банка обновлена: {pct}%")
-
+        amount = float(parts[1])
+        comment = " ".join(parts[2:]) if len(parts) > 2 else "Расход по темке"
+        
+        cursor.execute("INSERT INTO expenses (amount, comment) VALUES (?, ?)", (amount, comment))
         db.commit()
+        await message.answer(f"📉 Вычет зафиксирован: *-{amount} руб.* ({comment}). Сумма вычтена из долей каждого участника.", parse_mode="Markdown")
     except Exception:
-        await message.answer("❌ Ошибка в формате команды. Пример: `сет баланс 2 0`")
+        await message.answer("❌ Ошибка формата. Пример: `минус 500 бензин`")
 
+# Команда полного обнуления расходов
+@dp.message(F.text.lower() == "сброс вычетов")
+async def clear_expenses(message: Message):
+    if message.from_user.id != ADMIN_ID: return
+    cursor.execute("DELETE FROM expenses")
+    db.commit()
+    await message.answer("✅ Все ручные расходы и вычеты успешно сброшены в 0. Балансы пересчитаны.")
 
 # =====================================================================
-# ВЕБ-СЕРВЕР («Будильник» для Render)
+# ВЕБ-СЕРВЕР ДЛЯ СЕРВЕРА
 # =====================================================================
-async def handle_web_request(request):
-    return web.Response(text="Бот онлайн!")
-
-
+async def handle_web_request(request): return web.Response(text="Бот онлайн!")
 async def start_web_server():
     app = web.Application()
     app.router.add_get('/', handle_web_request)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.environ.get("PORT", 8080))
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
+    await web.TCPSite(runner, '0.0.0.0', port).start()
 
-
-# =====================================================================
-# ЗАПУСК
-# =====================================================================
 async def main():
     await start_web_server()
-    print("Бот успешно запущен на сервере!")
     await dp.start_polling(bot)
-
 
 if __name__ == "__main__":
     asyncio.run(main())
