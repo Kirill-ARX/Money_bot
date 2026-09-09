@@ -54,7 +54,7 @@ def get_main_keyboard(user_id):
         [KeyboardButton(text="📊 Общая статистика"), KeyboardButton(text="🧮 Калькулятор %")]
     ]
     if user_id == ADMIN_ID:
-        buttons.append([KeyboardButton(text="⚙️ Admin-Панель")])
+        buttons.append([KeyboardButton(text="⚙️ Админ-Панель")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 admin_kb = ReplyKeyboardMarkup(keyboard=[
