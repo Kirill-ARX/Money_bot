@@ -11,7 +11,7 @@ from aiohttp import web
 # =====================================================================
 TOKEN = "8628691428:AAEZ6Ec44uHwm5ey5xsIS6Ilj-9dNuDYOas"  # Токен бота
 
-ADMIN_ID = 5551943786  # Telegram ID адимна и пользователя (Кирилл)
+ADMIN_ID = 5551943786  # Telegram ID админа и пользователя (Кирилл)
 USER2_ID = 5178460435  # Telegram ID второго партнера (Максим)
 USER3_ID = 5959142753  # Telegram ID третьего партнера (Лёня)
 
@@ -62,7 +62,7 @@ db.commit()
 def get_main_keyboard(user_id):
     buttons = [
         [KeyboardButton(text="💰 Мой баланс"), KeyboardButton(text="📊 Общая статистика")],
-        [KeyboardButton(text="🧮 Калькулятор %")]
+        [KeyboardButton(text="🧮 Калькулятор %")]  # Кнопка называется так
     ]
     # Если кнопку нажимает админ (Кирилл)
     if user_id == ADMIN_ID:
@@ -127,7 +127,7 @@ async def global_status(message: Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-# Кнопка и команда: Калькулятор %
+# Кнопка и команда: Калькулятор % (ФИКС: ХЕНДЛЕР ТЕПЕРЬ СТРОГО СЛУШАЕТ НАЗВАНИЕ КНОПКИ)
 @dp.message(F.text == "🧮 Калькулятор %")
 @dp.message(Command("calculator"))
 async def bank_calc(message: Message):
@@ -164,7 +164,7 @@ async def get_chat_and_user_id(message: Message):
 
 
 # =====================================================================
-# АДМИНКА (ФИКС: ТЕПЕРЬ СЛУШАЕТ НАЗВАНИЕ НА РУССКОМ "⚙️ Админ-Панель")
+# АДМИНКА
 # =====================================================================
 @dp.message(F.text == "⚙️ Админ-Панель")
 async def admin_panel(message: Message):
@@ -188,7 +188,7 @@ async def info_how_to_change(message: Message):
 @dp.message(F.text == "📈 Поменять % вклада")
 async def info_how_to_pct(message: Message):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer("ℹ️ Чтобы поменять % ставку Озона, напиши:\n`сет процент 16.5`", parse_mode="Markdown")
+    await message.answer("ℹ️ Чтобы поменять % ставку банка, напиши:\n`сет процент 16.5`", parse_mode="Markdown")
 
 
 # Обработчик текстовых команд управления "сет ..."
@@ -219,7 +219,7 @@ async def admin_commands(message: Message):
         elif cmd_type == "процент":
             pct = float(parts[2])
             cursor.execute("UPDATE global_stats SET bank_percent = ? WHERE id = 1", (pct,))
-            await message.answer(f"✅ Процентная ставка bank обновлена: {pct}%")
+            await message.answer(f"✅ Процентная ставка банка обновлена: {pct}%")
 
         db.commit()
     except Exception:
