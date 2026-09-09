@@ -7,11 +7,11 @@ from aiogram.filters import Command
 from aiohttp import web
 
 # =====================================================================
-# НАСТРОЙКИ: Твои данные
+# НАСТРОЙКИ: Данные
 # =====================================================================
-TOKEN = "8628691428:AAEZ6Ec44uHwm5ey5xsIS6Ilj-9dNuDYOas"  # Токен твоего бота
+TOKEN = "8628691428:AAEZ6Ec44uHwm5ey5xsIS6Ilj-9dNuDYOas"  # Токен бота
 
-ADMIN_ID = 5551943786  # Твой Telegram ID (Кирилл - админ и юзер)
+ADMIN_ID = 5551943786  # Telegram ID адимна и пользователя (Кирилл)
 USER2_ID = 5178460435  # Telegram ID второго партнера (Максим)
 USER3_ID = 5959142753  # Telegram ID третьего партнера (Лёня)
 
@@ -45,7 +45,7 @@ cursor.execute("""
 CREATE TABLE IF NOT EXISTS global_stats (
     id INTEGER PRIMARY KEY,
     profit REAL DEFAULT 0.0,
-    ozon_percent REAL DEFAULT 15.0
+    bank_percent REAL DEFAULT 10.0
 )
 """)
 db.commit()
@@ -56,16 +56,15 @@ for uid in ALLOWED_USERS:
 cursor.execute("INSERT OR IGNORE INTO global_stats (id) VALUES (1)")
 db.commit()
 
-
 # =====================================================================
-# КЛАВИАТУРЫ (КНОПКИ — ТЕПЕРЬ СТРОГО КАК НА СКРИНШОТЕ)
+# КЛАВИАТУРЫ (КНОПКИ В ЧАТЕ С БОТОМ)
 # =====================================================================
 def get_main_keyboard(user_id):
     buttons = [
         [KeyboardButton(text="💰 Мой баланс"), KeyboardButton(text="📊 Общая статистика")],
-        [KeyboardButton(text="🧮 Калькулятор Ozon")]
+        [KeyboardButton(text="🧮 Калькулятор %")]
     ]
-    # Если кнопку нажимает админ (Кирилл) — добавляем кнопку админки на русском
+    # Если кнопку нажимает админ (Кирилл)
     if user_id == ADMIN_ID:
         buttons.append([KeyboardButton(text="⚙️ Админ-Панель")])
 
@@ -78,7 +77,6 @@ admin_kb = ReplyKeyboardMarkup(keyboard=[
     [KeyboardButton(text="🔙 Главное меню")]
 ], resize_keyboard=True)
 
-
 # =====================================================================
 # ЛОГИКА БОТА (ХЕНДЛЕРЫ)
 # =====================================================================
@@ -89,7 +87,7 @@ admin_kb = ReplyKeyboardMarkup(keyboard=[
 async def start_cmd(message: Message):
     if message.from_user.id not in ALLOWED_USERS:
         return await message.answer("❌ Доступ закрыт. Вы не входите в список участников.")
-        
+
     await message.answer(
         f"Привет, {message.from_user.first_name}! Что хочешь посмотреть?",
         reply_markup=get_main_keyboard(message.from_user.id)
@@ -110,9 +108,9 @@ async def my_balance(message: Message):
 @dp.message(Command("stat"))
 async def global_status(message: Message):
     if message.from_user.id not in ALLOWED_USERS: return
-    
+
     total_balances = cursor.execute("SELECT SUM(balance) FROM users").fetchone()[0] or 0.0
-    profit, ozon_pct = cursor.execute("SELECT profit, ozon_percent FROM global_stats WHERE id = 1").fetchone()
+    profit, bank_pct = cursor.execute("SELECT profit, bank_percent FROM global_stats WHERE id = 1").fetchone()
 
     users_info = ""
     all_users = cursor.execute("SELECT user_id, balance FROM users").fetchall()
@@ -123,28 +121,28 @@ async def global_status(message: Message):
         f"🌍 *ОБЩАЯ СТАТИСТИКА* 🌍\n\n"
         f"💰 *Всего денег в обороте:* {total_balances:,} руб.\n"
         f"📈 *Чистая прибыль:* {profit:,} руб.\n"
-        f"🏦 *Процент вклада в банке:* {ozon_pct}%\n\n"
+        f"🏦 *Процент вклада в банке:* {bank_pct}%\n\n"
         f"👥 *Разбивка по участникам:*\n{users_info}"
     )
     await message.answer(text, parse_mode="Markdown")
 
 
-# Кнопка и команда: Калькулятор Ozon (ФИКС: ТЕПЕРЬ СЛУШАЕТ НАЗВАНИЕ КНОПКИ)
-@dp.message(F.text == "🧮 Калькулятор Ozon")
+# Кнопка и команда: Калькулятор %
+@dp.message(F.text == "🧮 Калькулятор %")
 @dp.message(Command("calculator"))
-async def ozon_calc(message: Message):
+async def bank_calc(message: Message):
     if message.from_user.id not in ALLOWED_USERS: return
-    
-    total_balances = cursor.execute("SELECT SUM(balance) FROM users").fetchone()[0] or 0.0
-    _, ozon_pct = cursor.execute("SELECT profit, ozon_percent FROM global_stats WHERE id = 1").fetchone()
 
-    year_income = total_balances * (ozon_pct / 100)
+    total_balances = cursor.execute("SELECT SUM(balance) FROM users").fetchone()[0] or 0.0
+    _, bank_pct = cursor.execute("SELECT profit, bank_percent FROM global_stats WHERE id = 1").fetchone()
+
+    year_income = total_balances * (bank_pct / 100)
     month_income = year_income / 12
     day_income = year_income / 365
 
     text = (
-        f"🧮 *Прогноз доходности вклада Ozon*\n"
-        f"Расчет от общей суммы: *{total_balances:,} руб.* под *{ozon_pct}%*\n\n"
+        f"🧮 *Прогноз доходности вклада*\n"
+        f"Расчет от общей суммы: *{total_balances:,} руб.* под *{bank_pct}%*\n\n"
         f"💰 В день: `+{round(day_income, 2):,} руб.`\n"
         f"📅 В месяц: `+{round(month_income, 2):,} руб.`\n"
         f"🗓 В год: `+{round(year_income, 2):,} руб.`"
@@ -220,8 +218,8 @@ async def admin_commands(message: Message):
 
         elif cmd_type == "процент":
             pct = float(parts[2])
-            cursor.execute("UPDATE global_stats SET ozon_percent = ? WHERE id = 1", (pct,))
-            await message.answer(f"✅ Процентная ставка Ozon обновлена: {pct}%")
+            cursor.execute("UPDATE global_stats SET bank_percent = ? WHERE id = 1", (pct,))
+            await message.answer(f"✅ Процентная ставка bank обновлена: {pct}%")
 
         db.commit()
     except Exception:
@@ -233,6 +231,7 @@ async def admin_commands(message: Message):
 # =====================================================================
 async def handle_web_request(request):
     return web.Response(text="Бот онлайн!")
+
 
 async def start_web_server():
     app = web.Application()
@@ -251,6 +250,7 @@ async def main():
     await start_web_server()
     print("Бот успешно запущен на сервере!")
     await dp.start_polling(bot)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
