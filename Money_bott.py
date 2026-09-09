@@ -54,7 +54,7 @@ def get_main_keyboard(user_id):
         [KeyboardButton(text="📊 Общая статистика"), KeyboardButton(text="🧮 Калькулятор %")]
     ]
     if user_id == ADMIN_ID:
-        buttons.append([KeyboardButton(text="⚙️ Админ-Панель")])
+        buttons.append([KeyboardButton(text="⚙️ Admin-Панель")])
     return ReplyKeyboardMarkup(keyboard=buttons, resize_keyboard=True)
 
 admin_kb = ReplyKeyboardMarkup(keyboard=[
@@ -173,7 +173,7 @@ async def get_chat_and_user_id(message: Message):
 # =====================================================================
 # АДМИНКА
 # =====================================================================
-@dp.message(F.text == "⚙️ Админ-Панель")
+@dp.message(F.text == "⚙️ Admin-Панель")
 async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer(
