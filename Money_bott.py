@@ -173,7 +173,7 @@ async def get_chat_and_user_id(message: Message):
 # =====================================================================
 # АДМИНКА
 # =====================================================================
-@dp.message(F.text == "⚙️ Admin-Панель")
+@dp.message(F.text == "⚙️ Админ-Панель")
 async def admin_panel(message: Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer(
